@@ -1,0 +1,231 @@
+:root {
+  font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #0f172a;
+  background-color: #f5f7fb;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #eef3ff 0%, #f8fbff 60%, #ffffff 100%);
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+select,
+button,
+textarea {
+  font-family: inherit;
+  border-radius: 12px;
+  border: 1px solid #d0d7ff;
+  padding: 0.6rem 0.8rem;
+  background-color: #fff;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+}
+
+button {
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 25px -15px rgba(99, 102, 241, 0.7);
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 25px 45px rgba(15, 23, 42, 0.1);
+  padding: 1.8rem;
+  margin-bottom: 2rem;
+  backdrop-filter: blur(8px);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.card-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #1e1b4b;
+}
+
+.tab-switcher {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2rem;
+  gap: 1rem;
+}
+
+.tab-button {
+  padding: 0.7rem 1.2rem;
+  border-radius: 50px;
+  font-weight: 700;
+  border: none;
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.12);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.tab-button.active {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+  transform: translateY(-2px);
+}
+
+.grid {
+  display: grid;
+  gap: 1.2rem;
+}
+
+.grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 50px;
+  padding: 0.2rem 0.75rem;
+  background: rgba(99, 102, 241, 0.15);
+  color: #4338ca;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.table thead {
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.table th,
+.table td {
+  padding: 0.85rem 1rem;
+  text-align: left;
+}
+
+.table tbody tr:nth-child(even) {
+  background: #fafbff;
+}
+
+.table tbody tr:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-weight: 700;
+}
+
+.status-pill.success {
+  background: rgba(16, 185, 129, 0.2);
+  color: #047857;
+}
+
+.status-pill.pending {
+  background: rgba(251, 191, 36, 0.25);
+  color: #b45309;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(56, 189, 248, 0.2);
+  color: #0ea5e9;
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-weight: 700;
+}
+
+.progress-bar {
+  height: 12px;
+  background: rgba(99, 102, 241, 0.2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+}
+
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+@media (max-width: 768px) {
+  .card {
+    padding: 1.2rem;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+}
