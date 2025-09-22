@@ -1,27 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 
 interface Props {
   onAuthenticated: (session: Session) => void;
+  supabase: SupabaseClient<Database>;
 }
 
 type FormState = "sign-in" | "sign-up";
 
 type ProfileInsert = Database["public"]["Tables"]["profiles"]["Insert"];
 
-export default function TeacherAuthForm({ onAuthenticated }: Props) {
+export default function TeacherAuthForm({ onAuthenticated, supabase }: Props) {
   const [formState, setFormState] = useState<FormState>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const supabase = getSupabaseBrowserClient();
 
   const toggleFormState = () => {
     setFormState((prev) => (prev === "sign-in" ? "sign-up" : "sign-in"));

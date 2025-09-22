@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import { useCallback, useEffect, useState } from "react";
 import type { Database, Json } from "@/types/database.types";
 import { calculateCorrectCount } from "@/lib/fermi";
+import { useSupabaseBrowserClient } from "@/lib/useSupabaseBrowserClient";
 
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
 const QUIZ_DURATION_SECONDS = 40 * 60;
@@ -21,12 +21,7 @@ type SubmissionSummary = {
 };
 
 export default function StudentQuizPage() {
-  const supabase = useMemo(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-    return getSupabaseBrowserClient();
-  }, []);
+  const { client: supabase, error: supabaseError } = useSupabaseBrowserClient();
   const [stage, setStage] = useState<Stage>("login");
   const [student, setStudent] = useState<Student | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -261,7 +256,7 @@ export default function StudentQuizPage() {
           />
         </div>
         {error && <p className="form-error">{error}</p>}
-        <button className="primary-button" type="submit">
+        <button className="primary-button" type="submit" disabled={!supabase || !!supabaseError}>
           Start
         </button>
       </form>
@@ -284,7 +279,7 @@ export default function StudentQuizPage() {
           />
         </div>
         {error && <p className="form-error">{error}</p>}
-        <button className="primary-button" type="submit">
+        <button className="primary-button" type="submit" disabled={!supabase || !!supabaseError}>
           Continue to questions
         </button>
       </form>
@@ -343,7 +338,12 @@ export default function StudentQuizPage() {
       </ol>
       {error && <div className="error-banner">{error}</div>}
       <footer className="student-quiz__footer">
-        <button className="secondary-button" type="button" onClick={handleSubmit}>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={handleSubmit}
+          disabled={!supabase || !!supabaseError}
+        >
           Submit answers
         </button>
         <p>Responses are saved instantly for your teacher.</p>
@@ -363,6 +363,18 @@ export default function StudentQuizPage() {
       <p>Your teacher can review all answers instantly.</p>
     </div>
   );
+
+  if (supabaseError) {
+    return (
+      <main className="student-layout">
+        <div className="student-card">
+          <h1>Fermi Competition</h1>
+          <p className="form-error">{supabaseError.message}</p>
+          <p>Please refresh the page or contact your organizer for help.</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="student-layout">

@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 import { calculateCorrectCount, formatConfidence } from "@/lib/fermi";
 import LoadingState from "@/components/LoadingState";
@@ -46,10 +45,10 @@ type AddStudentResult = {
 interface TeacherDashboardProps {
   session: Session;
   onSignOut: () => Promise<void>;
+  supabase: SupabaseClient<Database>;
 }
 
-export default function TeacherDashboard({ session, onSignOut }: TeacherDashboardProps) {
-  const supabase = getSupabaseBrowserClient();
+export default function TeacherDashboard({ session, onSignOut, supabase }: TeacherDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [classes, setClasses] = useState<ClassRow[]>([]);
