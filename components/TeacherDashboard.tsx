@@ -629,10 +629,11 @@ function StudentResponsesEditor({ student, questions, onSaveResponses }: Student
             const response = student.student_responses.find(
               (item) => item.question_id === question.id,
             );
+            const answerValue = response?.answer_value;
+            const tolerance = Math.abs(question.correct_answer) * 0.5;
             const isCorrect =
-              response?.answer_value !== null &&
-              Math.abs((response.answer_value ?? 0) - question.correct_answer) <=
-                question.correct_answer * 0.5;
+              typeof answerValue === "number" &&
+              Math.abs(answerValue - question.correct_answer) <= tolerance;
 
             return (
               <tr key={question.id}>
