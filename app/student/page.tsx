@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
-import type { Database } from "@/types/database.types";
+import { useCallback, useEffect, useState } from "react";
+import type { Database, Json } from "@/types/database.types";
 import { calculateCorrectCount } from "@/lib/fermi";
+import { useSupabaseBrowserClient } from "@/lib/useSupabaseBrowserClient";
 
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
 const QUIZ_DURATION_SECONDS = 40 * 60;
@@ -21,7 +21,7 @@ type SubmissionSummary = {
 };
 
 export default function StudentQuizPage() {
-  const supabase = getSupabaseBrowserClient();
+  const { client: supabase, error: supabaseError } = useSupabaseBrowserClient();
   const [stage, setStage] = useState<Stage>("login");
   const [student, setStudent] = useState<Student | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -32,6 +32,168 @@ export default function StudentQuizPage() {
   const [error, setError] = useState<string | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number>(QUIZ_DURATION_SECONDS);
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
+
+  const fetchQuestions = async () => {
+    if (!supabase) {
+      setError("Supabase client is not ready. Please reload the page and try again.");
+      return;
+    }
+
+    const { data, error: questionError } = await supabase
+      .from("fermi_questions")
+      .select("*")
+      .order("order_index", { ascending: true });
+
+    if (questionError) {
+      setError(questionError.message);
+      return;
+    }
+
+    setQuestions(data ?? []);
+  };
+
+  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+
+    if (!supabase) {
+      setError("Supabase client is not ready. Please reload the page and try again.");
+      return;
+    }
+
+    const { data, error: loginError } = await supabase.rpc("student_login", {
+      p_username: username.trim(),
+      p_password: password.trim(),
+    });
+
+    if (loginError || !data) {
+      setError("Invalid credentials. Check your username and password.");
+      return;
+    }
+
+    const studentData = data;
+    setStudent(studentData);
+    setFullName(studentData.full_name ?? "");
+    await fetchQuestions();
+
+    const { data: responseData, error: responseError } = await supabase.rpc(
+      "get_student_responses",
+      {
+        p_student_id: studentData.id,
+        p_username: username.trim(),
+        p_password: password.trim(),
+      },
+    );
+
+    if (responseError) {
+      setError(responseError.message);
+      return;
+    }
+
+    setResponses(() => {
+      const initial: ResponseDraft = {};
+      (responseData ?? []).forEach((response) => {
+        initial[response.question_id] = {
+          answer: response.answer_value?.toString() ?? "",
+          confidence: response.confidence?.toString() ?? "",
+        };
+      });
+      return initial;
+    });
+
+    if (!studentData.first_login_completed || !studentData.full_name) {
+      setStage("profile");
+    } else {
+      setStage("quiz");
+    }
+  };
+
+  const handleProfileSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!student) return;
+
+    if (!supabase) {
+      setError("Supabase client is not ready. Please reload the page and try again.");
+      return;
+    }
+
+    const { error: updateError, data: profileData } = await supabase.rpc("complete_student_profile", {
+      p_student_id: student.id,
+      p_username: username.trim(),
+      p_password: password.trim(),
+      p_full_name: fullName.trim(),
+    });
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    const updatedStudent = profileData ?? {
+      ...student,
+      full_name: fullName.trim() || null,
+      first_login_completed: true,
+    };
+    setStudent(updatedStudent);
+    setStage("quiz");
+  };
+
+  const handleChangeResponse = (
+    questionId: number,
+    field: "answer" | "confidence",
+    value: string,
+  ) => {
+    setResponses((prev) => ({
+      ...prev,
+      [questionId]: {
+        answer: field === "answer" ? value : prev[questionId]?.answer ?? "",
+        confidence: field === "confidence" ? value : prev[questionId]?.confidence ?? "",
+      },
+    }));
+  };
+
+  const handleSubmit = useCallback(async () => {
+    if (!student || !supabase) {
+      if (!supabase) {
+        setError("Supabase client is not ready. Please reload the page and try again.");
+      }
+      return;
+    }
+
+    const payload = questions.map((question) => {
+      const draft = responses[question.id];
+      const answerValue = draft?.answer ? Number(draft.answer) : null;
+      const confidenceValue = draft?.confidence ? Number(draft.confidence) : null;
+      const isAnswerFinite = typeof answerValue === "number" && Number.isFinite(answerValue);
+      const isConfidenceFinite =
+        typeof confidenceValue === "number" && Number.isFinite(confidenceValue);
+      return {
+        question_id: question.id,
+        answer_value: isAnswerFinite ? answerValue : null,
+        confidence: isConfidenceFinite ? confidenceValue : null,
+      };
+    });
+
+    const { data, error: upsertError } = await supabase.rpc("upsert_student_responses", {
+      p_student_id: student.id,
+      p_username: username.trim(),
+      p_password: password.trim(),
+      p_payload: payload as Json,
+    });
+
+    if (upsertError) {
+      setError(upsertError.message);
+      return;
+    }
+
+    const updatedResponses = data ?? [];
+    const correctCount = calculateCorrectCount(updatedResponses, questions);
+    setSummary({ correct: correctCount, totalQuestions: questions.length });
+    setStage("complete");
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(`fermi-timer-${student.id}`);
+    }
+  }, [password, questions, responses, student, supabase, username]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -61,150 +223,12 @@ export default function StudentQuizPage() {
       };
     }
 
-    return () => {};
-  }, [stage, student]);
-
-  const fetchQuestions = async () => {
-    const { data, error: questionError } = await supabase
-      .from("fermi_questions")
-      .select("*")
-      .order("order_index", { ascending: true });
-
-    if (questionError) {
-      setError(questionError.message);
-      return;
-    }
-
-    setQuestions(data ?? []);
-  };
-
-  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError(null);
-
-    const { data, error: loginError } = await supabase.rpc("student_login", {
-      p_username: username.trim(),
-      p_password: password.trim(),
-    });
-
-    if (loginError || !data) {
-      setError("Invalid credentials. Check your username and password.");
-      return;
-    }
-
-    const studentData = data as Student;
-    setStudent(studentData);
-    setFullName(studentData.full_name ?? "");
-    await fetchQuestions();
-
-    const { data: responseData, error: responseError } = await supabase.rpc(
-      "get_student_responses",
-      {
-        p_student_id: studentData.id,
-        p_username: username.trim(),
-        p_password: password.trim(),
-      },
-    );
-
-    if (responseError) {
-      setError(responseError.message);
-      return;
-    }
-
-    setResponses(() => {
-      const initial: ResponseDraft = {};
-      (responseData as Database["public"]["Tables"]["student_responses"]["Row"][] | null)?.forEach(
-        (response) => {
-          initial[response.question_id] = {
-            answer: response.answer_value?.toString() ?? "",
-            confidence: response.confidence?.toString() ?? "",
-          };
-        },
-      );
-      return initial;
-    });
-
-    if (!studentData.first_login_completed || !studentData.full_name) {
-      setStage("profile");
-    } else {
-      setStage("quiz");
-    }
-  };
-
-  const handleProfileSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!student) return;
-
-    const { error: updateError, data } = await supabase.rpc("complete_student_profile", {
-      p_student_id: student.id,
-      p_username: username.trim(),
-      p_password: password.trim(),
-      p_full_name: fullName.trim(),
-    });
-
-    if (updateError) {
-      setError(updateError.message);
-      return;
-    }
-
-    const updatedStudent = (data as Student | null) ?? {
-      ...student,
-      full_name: fullName.trim() || null,
-      first_login_completed: true,
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
     };
-    setStudent(updatedStudent);
-    setStage("quiz");
-  };
-
-  const handleChangeResponse = (
-    questionId: number,
-    field: "answer" | "confidence",
-    value: string,
-  ) => {
-    setResponses((prev) => ({
-      ...prev,
-      [questionId]: {
-        answer: field === "answer" ? value : prev[questionId]?.answer ?? "",
-        confidence: field === "confidence" ? value : prev[questionId]?.confidence ?? "",
-      },
-    }));
-  };
-
-  const handleSubmit = async () => {
-    if (!student) return;
-
-    const payload = questions.map((question) => {
-      const draft = responses[question.id];
-      const answerValue = draft?.answer ? Number(draft.answer) : null;
-      const confidenceValue = draft?.confidence ? Number(draft.confidence) : null;
-      return {
-        question_id: question.id,
-        answer_value: Number.isFinite(answerValue) ? answerValue : null,
-        confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
-      };
-    });
-
-    const { data, error: upsertError } = await supabase.rpc("upsert_student_responses", {
-      p_student_id: student.id,
-      p_username: username.trim(),
-      p_password: password.trim(),
-      p_payload: payload,
-    });
-
-    if (upsertError) {
-      setError(upsertError.message);
-      return;
-    }
-
-    const updatedResponses =
-      (data as Database["public"]["Tables"]["student_responses"]["Row"][] | null) ?? [];
-    const correctCount = calculateCorrectCount(updatedResponses, questions);
-    setSummary({ correct: correctCount, totalQuestions: questions.length });
-    setStage("complete");
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(`fermi-timer-${student.id}`);
-    }
-  };
+  }, [handleSubmit, stage, student]);
 
   const renderLogin = () => (
     <div className="student-card">
@@ -232,7 +256,7 @@ export default function StudentQuizPage() {
           />
         </div>
         {error && <p className="form-error">{error}</p>}
-        <button className="primary-button" type="submit">
+        <button className="primary-button" type="submit" disabled={!supabase || !!supabaseError}>
           Start
         </button>
       </form>
@@ -255,7 +279,7 @@ export default function StudentQuizPage() {
           />
         </div>
         {error && <p className="form-error">{error}</p>}
-        <button className="primary-button" type="submit">
+        <button className="primary-button" type="submit" disabled={!supabase || !!supabaseError}>
           Continue to questions
         </button>
       </form>
@@ -314,7 +338,12 @@ export default function StudentQuizPage() {
       </ol>
       {error && <div className="error-banner">{error}</div>}
       <footer className="student-quiz__footer">
-        <button className="secondary-button" onClick={() => handleSubmit(false)}>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={handleSubmit}
+          disabled={!supabase || !!supabaseError}
+        >
           Submit answers
         </button>
         <p>Responses are saved instantly for your teacher.</p>
@@ -334,6 +363,18 @@ export default function StudentQuizPage() {
       <p>Your teacher can review all answers instantly.</p>
     </div>
   );
+
+  if (supabaseError) {
+    return (
+      <main className="student-layout">
+        <div className="student-card">
+          <h1>Fermi Competition</h1>
+          <p className="form-error">{supabaseError.message}</p>
+          <p>Please refresh the page or contact your organizer for help.</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="student-layout">

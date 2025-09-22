@@ -1,14 +1,39 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 import { calculateCorrectCount, formatConfidence } from "@/lib/fermi";
 import LoadingState from "@/components/LoadingState";
 import { v4 as uuid } from "uuid";
 
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
+const MAX_CLASS_CODE_ATTEMPTS = 5;
+
+type SupabaseErrorLike = { message?: unknown };
+
+const isSupabaseErrorLike = (error: unknown): error is SupabaseErrorLike =>
+  typeof error === "object" && error !== null && "message" in error;
+
+const normalizeSupabaseError = (error: unknown) => {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  if (isSupabaseErrorLike(error)) {
+    const { message } = error;
+    if (typeof message === "string") {
+      if (message.toLowerCase().includes("no api key")) {
+        return new Error(
+          "We couldn't authenticate with Supabase. Please refresh the page and sign in again before retrying.",
+        );
+      }
+      return new Error(message);
+    }
+  }
+
+  return new Error("An unexpected error occurred while communicating with Supabase.");
+};
 
 type Question = Database["public"]["Tables"]["fermi_questions"]["Row"];
 type StudentResponse = Database["public"]["Tables"]["student_responses"]["Row"];
@@ -46,10 +71,10 @@ type AddStudentResult = {
 interface TeacherDashboardProps {
   session: Session;
   onSignOut: () => Promise<void>;
+  supabase: SupabaseClient<Database>;
 }
 
-export default function TeacherDashboard({ session, onSignOut }: TeacherDashboardProps) {
-  const supabase = getSupabaseBrowserClient();
+export default function TeacherDashboard({ session, onSignOut, supabase }: TeacherDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -83,13 +108,13 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
         ]);
 
       if (questionError) {
-        setError(questionError.message);
+        setError(normalizeSupabaseError(questionError).message);
         setLoading(false);
         return;
       }
 
       if (classError) {
-        setError(classError.message);
+        setError(normalizeSupabaseError(classError).message);
         setLoading(false);
         return;
       }
@@ -115,8 +140,19 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
 
   const generateClassCode = () => {
     const prefix = "FERMI";
-    const suffix = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, "");
-    return `${prefix}-${suffix.slice(0, 5)}`;
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const length = 6;
+
+    let suffix = "";
+
+    if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+      const randomValues = window.crypto.getRandomValues(new Uint8Array(length));
+      suffix = Array.from(randomValues, (value) => alphabet[value % alphabet.length]).join("");
+    } else {
+      suffix = Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+    }
+
+    return `${prefix}-${suffix}`;
   };
 
   const generateCredentials = (
@@ -151,13 +187,43 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
       .select("*, student_responses:student_responses(*)");
 
     if (insertError) {
-      throw insertError;
+      throw normalizeSupabaseError(insertError);
     }
 
     return ((data as StudentRow[]) ?? []).map((student) => ({
       ...student,
       student_responses: student.student_responses ?? [],
     }));
+  };
+
+  const insertClassWithUniqueCode = async (
+    name: string,
+  ): Promise<Database["public"]["Tables"]["classes"]["Row"]> => {
+    for (let attempt = 0; attempt < MAX_CLASS_CODE_ATTEMPTS; attempt += 1) {
+      const classCode = generateClassCode();
+      const { data, error } = await supabase
+        .from("classes")
+        .insert({
+          id: uuid(),
+          teacher_id: teacherId,
+          name,
+          class_code: classCode,
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as Database["public"]["Tables"]["classes"]["Row"];
+      }
+
+      if (error?.code === "23505") {
+        continue;
+      }
+
+      throw normalizeSupabaseError(error);
+    }
+
+    throw new Error("We couldn't generate a unique class code. Please try again.");
   };
 
   const handleCreateClass = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -170,41 +236,25 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
     }
 
     try {
-      const classCode = generateClassCode();
-      const { data, error: classError } = await supabase
-        .from("classes")
-        .insert({
-          id: uuid(),
-          teacher_id: teacherId,
-          name: newClass.name.trim(),
-          class_code: classCode,
-        })
-        .select()
-        .single();
+      const trimmedName = newClass.name.trim();
+      const createdClass = await insertClassWithUniqueCode(trimmedName);
 
-      if (classError || !data) {
-        throw classError ?? new Error("Unable to create class");
-      }
-
-      const credentials = generateCredentials(classCode, newClass.studentCount, 0);
-      const insertedStudents = await persistStudents(data.id, credentials);
+      const credentials = generateCredentials(createdClass.class_code, newClass.studentCount, 0);
+      const insertedStudents = await persistStudents(createdClass.id, credentials);
 
       setShowCredentials((prev) => ({
         ...prev,
-        [data.id]: credentials,
+        [createdClass.id]: credentials,
       }));
 
       setClasses((prev) => [
         ...prev,
-        {
-          ...(data as ClassRow),
-          students: insertedStudents,
-        },
+        { ...createdClass, students: insertedStudents } as ClassRow,
       ]);
 
       setNewClass({ name: "", studentCount: newClass.studentCount });
     } catch (classCreationError) {
-      setError(classCreationError instanceof Error ? classCreationError.message : "Unable to create class");
+      setError(normalizeSupabaseError(classCreationError).message);
     }
   };
 
@@ -237,7 +287,7 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
         ),
       );
     } catch (addStudentError) {
-      setError(addStudentError instanceof Error ? addStudentError.message : "Unable to add students");
+      setError(normalizeSupabaseError(addStudentError).message);
     }
   };
 
@@ -248,7 +298,7 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
       .eq("id", studentId);
 
     if (updateError) {
-      setError(updateError.message);
+      setError(normalizeSupabaseError(updateError).message);
     } else {
       setClasses((prev) =>
         prev.map((classEntry) => ({
@@ -286,7 +336,7 @@ export default function TeacherDashboard({ session, onSignOut }: TeacherDashboar
       .select("*");
 
     if (upsertError) {
-      setError(upsertError.message);
+      setError(normalizeSupabaseError(upsertError).message);
       return;
     }
 
@@ -629,10 +679,11 @@ function StudentResponsesEditor({ student, questions, onSaveResponses }: Student
             const response = student.student_responses.find(
               (item) => item.question_id === question.id,
             );
+            const answerValue = response?.answer_value;
+            const tolerance = Math.abs(question.correct_answer) * 0.5;
             const isCorrect =
-              response?.answer_value !== null &&
-              Math.abs((response.answer_value ?? 0) - question.correct_answer) <=
-                question.correct_answer * 0.5;
+              typeof answerValue === "number" &&
+              Math.abs(answerValue - question.correct_answer) <= tolerance;
 
             return (
               <tr key={question.id}>
