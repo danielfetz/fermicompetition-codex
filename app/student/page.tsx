@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
-import type { Database } from "@/types/database.types";
+import type { Database, Json } from "@/types/database.types";
 import { calculateCorrectCount } from "@/lib/fermi";
 
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
@@ -33,37 +33,6 @@ export default function StudentQuizPage() {
   const [timeRemaining, setTimeRemaining] = useState<number>(QUIZ_DURATION_SECONDS);
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
-
-    if (stage === "quiz" && student) {
-      const storageKey = `fermi-timer-${student.id}`;
-      const storedStart = typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-      const startTime = storedStart ? Number(storedStart) : Date.now();
-      if (!storedStart && typeof window !== "undefined") {
-        localStorage.setItem(storageKey, startTime.toString());
-      }
-
-      const tick = () => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = Math.max(QUIZ_DURATION_SECONDS - elapsed, 0);
-        setTimeRemaining(remaining);
-        if (remaining === 0) {
-          handleSubmit();
-        }
-      };
-
-      tick();
-      timer = setInterval(tick, 1000);
-
-      return () => {
-        if (timer) clearInterval(timer);
-      };
-    }
-
-    return () => {};
-  }, [stage, student]);
-
   const fetchQuestions = async () => {
     const { data, error: questionError } = await supabase
       .from("fermi_questions")
@@ -92,7 +61,7 @@ export default function StudentQuizPage() {
       return;
     }
 
-    const studentData = data as Student;
+    const studentData = data;
     setStudent(studentData);
     setFullName(studentData.full_name ?? "");
     await fetchQuestions();
@@ -113,14 +82,12 @@ export default function StudentQuizPage() {
 
     setResponses(() => {
       const initial: ResponseDraft = {};
-      (responseData as Database["public"]["Tables"]["student_responses"]["Row"][] | null)?.forEach(
-        (response) => {
-          initial[response.question_id] = {
-            answer: response.answer_value?.toString() ?? "",
-            confidence: response.confidence?.toString() ?? "",
-          };
-        },
-      );
+      (responseData ?? []).forEach((response) => {
+        initial[response.question_id] = {
+          answer: response.answer_value?.toString() ?? "",
+          confidence: response.confidence?.toString() ?? "",
+        };
+      });
       return initial;
     });
 
@@ -135,7 +102,7 @@ export default function StudentQuizPage() {
     event.preventDefault();
     if (!student) return;
 
-    const { error: updateError, data } = await supabase.rpc("complete_student_profile", {
+    const { error: updateError, data: profileData } = await supabase.rpc("complete_student_profile", {
       p_student_id: student.id,
       p_username: username.trim(),
       p_password: password.trim(),
@@ -147,7 +114,7 @@ export default function StudentQuizPage() {
       return;
     }
 
-    const updatedStudent = (data as Student | null) ?? {
+    const updatedStudent = profileData ?? {
       ...student,
       full_name: fullName.trim() || null,
       first_login_completed: true,
@@ -170,17 +137,20 @@ export default function StudentQuizPage() {
     }));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     if (!student) return;
 
     const payload = questions.map((question) => {
       const draft = responses[question.id];
       const answerValue = draft?.answer ? Number(draft.answer) : null;
       const confidenceValue = draft?.confidence ? Number(draft.confidence) : null;
+      const isAnswerFinite = typeof answerValue === "number" && Number.isFinite(answerValue);
+      const isConfidenceFinite =
+        typeof confidenceValue === "number" && Number.isFinite(confidenceValue);
       return {
         question_id: question.id,
-        answer_value: Number.isFinite(answerValue) ? answerValue : null,
-        confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
+        answer_value: isAnswerFinite ? answerValue : null,
+        confidence: isConfidenceFinite ? confidenceValue : null,
       };
     });
 
@@ -188,7 +158,7 @@ export default function StudentQuizPage() {
       p_student_id: student.id,
       p_username: username.trim(),
       p_password: password.trim(),
-      p_payload: payload,
+      p_payload: payload as Json,
     });
 
     if (upsertError) {
@@ -196,15 +166,49 @@ export default function StudentQuizPage() {
       return;
     }
 
-    const updatedResponses =
-      (data as Database["public"]["Tables"]["student_responses"]["Row"][] | null) ?? [];
+    const updatedResponses = data ?? [];
     const correctCount = calculateCorrectCount(updatedResponses, questions);
     setSummary({ correct: correctCount, totalQuestions: questions.length });
     setStage("complete");
     if (typeof window !== "undefined") {
       localStorage.removeItem(`fermi-timer-${student.id}`);
     }
-  };
+  }, [password, questions, responses, student, supabase, username]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+
+    if (stage === "quiz" && student) {
+      const storageKey = `fermi-timer-${student.id}`;
+      const storedStart = typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
+      const startTime = storedStart ? Number(storedStart) : Date.now();
+      if (!storedStart && typeof window !== "undefined") {
+        localStorage.setItem(storageKey, startTime.toString());
+      }
+
+      const tick = () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const remaining = Math.max(QUIZ_DURATION_SECONDS - elapsed, 0);
+        setTimeRemaining(remaining);
+        if (remaining === 0) {
+          handleSubmit();
+        }
+      };
+
+      tick();
+      timer = setInterval(tick, 1000);
+
+      return () => {
+        if (timer) clearInterval(timer);
+      };
+    }
+
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [handleSubmit, stage, student]);
 
   const renderLogin = () => (
     <div className="student-card">
@@ -314,7 +318,7 @@ export default function StudentQuizPage() {
       </ol>
       {error && <div className="error-banner">{error}</div>}
       <footer className="student-quiz__footer">
-        <button className="secondary-button" onClick={() => handleSubmit(false)}>
+        <button className="secondary-button" type="button" onClick={handleSubmit}>
           Submit answers
         </button>
         <p>Responses are saved instantly for your teacher.</p>

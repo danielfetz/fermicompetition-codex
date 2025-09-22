@@ -137,7 +137,41 @@ export interface Database {
       };
     };
     Views: {};
-    Functions: {};
+    Functions: {
+      complete_student_profile: {
+        Args: {
+          p_student_id: string;
+          p_username: string;
+          p_password: string;
+          p_full_name: string;
+        };
+        Returns: Database["public"]["Tables"]["students"]["Row"];
+      };
+      get_student_responses: {
+        Args: {
+          p_student_id: string;
+          p_username: string;
+          p_password: string;
+        };
+        Returns: Database["public"]["Tables"]["student_responses"]["Row"][];
+      };
+      student_login: {
+        Args: {
+          p_username: string;
+          p_password: string;
+        };
+        Returns: Database["public"]["Tables"]["students"]["Row"];
+      };
+      upsert_student_responses: {
+        Args: {
+          p_student_id: string;
+          p_username: string;
+          p_password: string;
+          p_payload: Json;
+        };
+        Returns: Database["public"]["Tables"]["student_responses"]["Row"][];
+      };
+    };
     Enums: {};
     CompositeTypes: {};
   };
