@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { Database, Json } from "@/types/database.types";
 import { calculateCorrectCount } from "@/lib/fermi";
@@ -21,7 +21,12 @@ type SubmissionSummary = {
 };
 
 export default function StudentQuizPage() {
-  const supabase = getSupabaseBrowserClient();
+  const supabase = useMemo(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return getSupabaseBrowserClient();
+  }, []);
   const [stage, setStage] = useState<Stage>("login");
   const [student, setStudent] = useState<Student | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -34,6 +39,11 @@ export default function StudentQuizPage() {
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
 
   const fetchQuestions = async () => {
+    if (!supabase) {
+      setError("Supabase client is not ready. Please reload the page and try again.");
+      return;
+    }
+
     const { data, error: questionError } = await supabase
       .from("fermi_questions")
       .select("*")
@@ -50,6 +60,11 @@ export default function StudentQuizPage() {
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+
+    if (!supabase) {
+      setError("Supabase client is not ready. Please reload the page and try again.");
+      return;
+    }
 
     const { data, error: loginError } = await supabase.rpc("student_login", {
       p_username: username.trim(),
@@ -102,6 +117,11 @@ export default function StudentQuizPage() {
     event.preventDefault();
     if (!student) return;
 
+    if (!supabase) {
+      setError("Supabase client is not ready. Please reload the page and try again.");
+      return;
+    }
+
     const { error: updateError, data: profileData } = await supabase.rpc("complete_student_profile", {
       p_student_id: student.id,
       p_username: username.trim(),
@@ -138,7 +158,12 @@ export default function StudentQuizPage() {
   };
 
   const handleSubmit = useCallback(async () => {
-    if (!student) return;
+    if (!student || !supabase) {
+      if (!supabase) {
+        setError("Supabase client is not ready. Please reload the page and try again.");
+      }
+      return;
+    }
 
     const payload = questions.map((question) => {
       const draft = responses[question.id];
