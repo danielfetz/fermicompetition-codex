@@ -1,3 +1,5 @@
+[Attempt #1]
+
 # Fermi Competition Hub
 
 A Duolingo-inspired web application for running the Fermi competition across schools, powered by Next.js and Supabase. Teachers can manage classes, distribute student credentials, collect submissions, and review performance while students complete the official question set inside a timed experience.
