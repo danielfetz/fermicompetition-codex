@@ -10,15 +10,18 @@ import { v4 as uuid } from "uuid";
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
 const MAX_CLASS_CODE_ATTEMPTS = 5;
 
-type SupabaseErrorLike = { message?: string } | null;
+type SupabaseErrorLike = { message?: unknown };
+
+const isSupabaseErrorLike = (error: unknown): error is SupabaseErrorLike =>
+  typeof error === "object" && error !== null && "message" in error;
 
 const normalizeSupabaseError = (error: unknown) => {
   if (error instanceof Error) {
     return error;
   }
 
-  if (error && typeof error === "object") {
-    const { message } = error as SupabaseErrorLike;
+  if (isSupabaseErrorLike(error)) {
+    const { message } = error;
     if (typeof message === "string") {
       if (message.toLowerCase().includes("no api key")) {
         return new Error(
