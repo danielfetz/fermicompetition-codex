@@ -10,6 +10,28 @@ import { v4 as uuid } from "uuid";
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
 const MAX_CLASS_CODE_ATTEMPTS = 5;
 
+type SupabaseErrorLike = { message?: string } | null;
+
+const normalizeSupabaseError = (error: unknown) => {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  if (error && typeof error === "object") {
+    const { message } = error as SupabaseErrorLike;
+    if (typeof message === "string") {
+      if (message.toLowerCase().includes("no api key")) {
+        return new Error(
+          "We couldn't authenticate with Supabase. Please refresh the page and sign in again before retrying.",
+        );
+      }
+      return new Error(message);
+    }
+  }
+
+  return new Error("An unexpected error occurred while communicating with Supabase.");
+};
+
 type Question = Database["public"]["Tables"]["fermi_questions"]["Row"];
 type StudentResponse = Database["public"]["Tables"]["student_responses"]["Row"];
 type StudentRow = Database["public"]["Tables"]["students"]["Row"] & {
@@ -83,13 +105,13 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
         ]);
 
       if (questionError) {
-        setError(questionError.message);
+        setError(normalizeSupabaseError(questionError).message);
         setLoading(false);
         return;
       }
 
       if (classError) {
-        setError(classError.message);
+        setError(normalizeSupabaseError(classError).message);
         setLoading(false);
         return;
       }
@@ -162,7 +184,7 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
       .select("*, student_responses:student_responses(*)");
 
     if (insertError) {
-      throw insertError;
+      throw normalizeSupabaseError(insertError);
     }
 
     return ((data as StudentRow[]) ?? []).map((student) => ({
@@ -195,7 +217,7 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
         continue;
       }
 
-      throw error ?? new Error("Unable to create class");
+      throw normalizeSupabaseError(error);
     }
 
     throw new Error("We couldn't generate a unique class code. Please try again.");
@@ -229,7 +251,7 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
 
       setNewClass({ name: "", studentCount: newClass.studentCount });
     } catch (classCreationError) {
-      setError(classCreationError instanceof Error ? classCreationError.message : "Unable to create class");
+      setError(normalizeSupabaseError(classCreationError).message);
     }
   };
 
@@ -262,7 +284,7 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
         ),
       );
     } catch (addStudentError) {
-      setError(addStudentError instanceof Error ? addStudentError.message : "Unable to add students");
+      setError(normalizeSupabaseError(addStudentError).message);
     }
   };
 
@@ -273,7 +295,7 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
       .eq("id", studentId);
 
     if (updateError) {
-      setError(updateError.message);
+      setError(normalizeSupabaseError(updateError).message);
     } else {
       setClasses((prev) =>
         prev.map((classEntry) => ({
@@ -311,7 +333,7 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
       .select("*");
 
     if (upsertError) {
-      setError(upsertError.message);
+      setError(normalizeSupabaseError(upsertError).message);
       return;
     }
 
