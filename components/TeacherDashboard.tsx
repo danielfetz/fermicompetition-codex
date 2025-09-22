@@ -8,6 +8,7 @@ import LoadingState from "@/components/LoadingState";
 import { v4 as uuid } from "uuid";
 
 const CONFIDENCE_OPTIONS = [10, 30, 50, 70, 90];
+const MAX_CLASS_CODE_ATTEMPTS = 5;
 
 type Question = Database["public"]["Tables"]["fermi_questions"]["Row"];
 type StudentResponse = Database["public"]["Tables"]["student_responses"]["Row"];
@@ -114,8 +115,19 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
 
   const generateClassCode = () => {
     const prefix = "FERMI";
-    const suffix = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, "");
-    return `${prefix}-${suffix.slice(0, 5)}`;
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const length = 6;
+
+    let suffix = "";
+
+    if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+      const randomValues = window.crypto.getRandomValues(new Uint8Array(length));
+      suffix = Array.from(randomValues, (value) => alphabet[value % alphabet.length]).join("");
+    } else {
+      suffix = Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+    }
+
+    return `${prefix}-${suffix}`;
   };
 
   const generateCredentials = (
@@ -159,6 +171,36 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
     }));
   };
 
+  const insertClassWithUniqueCode = async (
+    name: string,
+  ): Promise<Database["public"]["Tables"]["classes"]["Row"]> => {
+    for (let attempt = 0; attempt < MAX_CLASS_CODE_ATTEMPTS; attempt += 1) {
+      const classCode = generateClassCode();
+      const { data, error } = await supabase
+        .from("classes")
+        .insert({
+          id: uuid(),
+          teacher_id: teacherId,
+          name,
+          class_code: classCode,
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as Database["public"]["Tables"]["classes"]["Row"];
+      }
+
+      if (error?.code === "23505") {
+        continue;
+      }
+
+      throw error ?? new Error("Unable to create class");
+    }
+
+    throw new Error("We couldn't generate a unique class code. Please try again.");
+  };
+
   const handleCreateClass = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -169,36 +211,20 @@ export default function TeacherDashboard({ session, onSignOut, supabase }: Teach
     }
 
     try {
-      const classCode = generateClassCode();
-      const { data, error: classError } = await supabase
-        .from("classes")
-        .insert({
-          id: uuid(),
-          teacher_id: teacherId,
-          name: newClass.name.trim(),
-          class_code: classCode,
-        })
-        .select()
-        .single();
+      const trimmedName = newClass.name.trim();
+      const createdClass = await insertClassWithUniqueCode(trimmedName);
 
-      if (classError || !data) {
-        throw classError ?? new Error("Unable to create class");
-      }
-
-      const credentials = generateCredentials(classCode, newClass.studentCount, 0);
-      const insertedStudents = await persistStudents(data.id, credentials);
+      const credentials = generateCredentials(createdClass.class_code, newClass.studentCount, 0);
+      const insertedStudents = await persistStudents(createdClass.id, credentials);
 
       setShowCredentials((prev) => ({
         ...prev,
-        [data.id]: credentials,
+        [createdClass.id]: credentials,
       }));
 
       setClasses((prev) => [
         ...prev,
-        {
-          ...(data as ClassRow),
-          students: insertedStudents,
-        },
+        { ...createdClass, students: insertedStudents } as ClassRow,
       ]);
 
       setNewClass({ name: "", studentCount: newClass.studentCount });
